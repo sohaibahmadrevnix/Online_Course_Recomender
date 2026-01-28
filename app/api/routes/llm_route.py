@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends , HTTPException
 from sqlalchemy.orm import Session
-from app.src.rag_pipeline.rag_agent import RagCourseAgent
+from app.src.Tools.router import CourseRouter
 from app.dep.dependencies import get_current_user, get_db
 from app.db.models.query_model import UserQuery
 from app.api.routes.schema import QueryRequest, QueryResponse, CourseItem
@@ -8,13 +8,19 @@ import json
 
 
 router = APIRouter()
-agent = RagCourseAgent()
+router_instance = CourseRouter()
 
 @router.post("/query" , response_model=QueryResponse)
 async def search_courses(req: QueryRequest , current_user = Depends(get_current_user),db: Session = Depends(get_db)):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    result = await agent.search(req.query)
+    
+    result = await router_instance.route_and_execute(req.query)
+    
+    # Check if the router returned a validation error
+    if isinstance(result, dict) and result.get("error") == "invalid_query":
+        raise HTTPException(status_code=400, detail=result.get("message"))
+
     user_query = UserQuery(
     user_id=current_user.id,
     query_text=req.query,
@@ -22,7 +28,8 @@ async def search_courses(req: QueryRequest , current_user = Depends(get_current_
     )
     db.add(user_query)
     db.commit()
-    if result != {}:
+
+    if result != {} and "results" in result:
         result_list = result.get("results", [])
         items = []
         for res in result_list:
